@@ -1,0 +1,51 @@
+:root {
+  /* Aura Dark Theme (Default) */
+  --bg-primary: #0b0c10;
+  --bg-secondary: #12141c;
+  --card-bg: rgba(31, 40, 51, 0.45);
+  --card-border: rgba(138, 43, 226, 0.18);
+  --glow-color: rgba(138, 43, 226, 0.35);
+  
+  --text-primary: #ffffff;
+  --text-secondary: #a0a5b5;
+  --text-muted: #656976;
+  
+  --accent-1: #8a2be2;
+  --accent-2: #00ffff;
+  --accent-gradient: linear-gradient(135deg, #8a2be2 0%, #00ffff 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #9b3ff3 0%, #33ffff 100%);
+  
+  --danger: #ff4757;
+  --success: #2ed573;
+  --warning: #ffa502;
+  
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+  --radius-full: 9999px;
+  
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --glass-blur: blur(14px);
+}
+
+.light-mode {
+  /* Aura Light Theme */
+  --bg-primary: #f8f9fa;
+  --bg-secondary: #ffffff;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --card-border: rgba(255, 107, 107, 0.18);
+  --glow-color: rgba(255, 107, 107, 0.2);
+  
+  --text-primary: #1e272e;
+  --text-secondary: #57606f;
+  --text-muted: #8e95a5;
+  
+  --accent-1: #ff6b6b;
+  --accent-2: #70a1ff;
+  --accent-gradient: linear-gradient(135deg, #ff6b6b 0%, #70a1ff 100%);
+  --accent-gradient-hover: linear-gradient(135deg, #ff8282 0%, #85b0ff 100%);
+}
