@@ -3,6 +3,6 @@ services:
     name: aura
     env: node
     root: server
-    buildCommand: npm install
+    buildCommand: rm -rf node_modules && npm ci
     startCommand: node src/index.js
     autoDeploy: true
