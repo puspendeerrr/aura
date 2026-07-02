@@ -95,11 +95,11 @@ app.use((err, req, res, next) => {
 });
 
 const mongoose = require('mongoose');
+const bcrypt = require('bcryptjs');
 
 // Seed admin user automatically when connection is established
 mongoose.connection.once('open', async () => {
   try {
-    const bcrypt = require('bcrypt');
     const adminUser = await User.findOne({ username: 'admin' });
     if (!adminUser) {
       const passwordHash = await bcrypt.hash('adminpassword123', 10);

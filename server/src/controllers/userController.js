@@ -388,7 +388,7 @@ exports.getMutualFollowersList = async (req, res) => {
   }
 };
 
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 
 exports.changePassword = async (req, res) => {
   try {

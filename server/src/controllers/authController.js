@@ -1,4 +1,4 @@
-const bcrypt = require('bcrypt');
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const emailService = require('../services/email');
@@ -6,8 +6,8 @@ const emailService = require('../services/email');
 // Helper to generate JWT
 const generateToken = (userId) => {
   return jwt.sign(
-    { id: userId }, 
-    process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026', 
+    { id: userId },
+    process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026',
     { expiresIn: '7d' }
   );
 };
@@ -87,8 +87,8 @@ exports.login = async (req, res) => {
     }
 
     if (user.isBanned) {
-      return res.status(403).json({ 
-        error: 'Your account has been suspended', 
+      return res.status(403).json({
+        error: 'Your account has been suspended',
         reason: user.banReason || 'Violation of community guidelines'
       });
     }
