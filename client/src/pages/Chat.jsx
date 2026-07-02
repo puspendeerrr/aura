@@ -4,7 +4,8 @@ import { useSocket } from '../context/SocketContext';
 import { 
   Send, Image, Smile, ArrowLeft, MoreVertical, ShieldAlert, Check, CheckCheck, 
   Pin, Trash, Forward, Reply, Eye, EyeOff, Clock, Plus, Search, X, 
-  ChevronRight, UserPlus, Users, VolumeX, Folder, Info, UserCheck, Edit3, Settings, AlertTriangle
+  ChevronRight, UserPlus, Users, VolumeX, Folder, Info, UserCheck, Edit3, Settings, AlertTriangle,
+  Archive
 } from 'lucide-react';
 
 export default function Chat() {
