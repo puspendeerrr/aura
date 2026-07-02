@@ -4,6 +4,12 @@ const Room = require('../models/Room');
 const Message = require('../models/Message');
 const Block = require('../models/Block');
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[AUTH FATAL] JWT_SECRET is required in environment variables.');
+  process.exit(1);
+}
+
 // Map to track active user socket IDs: userId -> socketId
 const activeUsers = new Map();
 
@@ -16,7 +22,7 @@ const registerChatHandlers = (io) => {
         return next(new Error('Authentication error: Token missing'));
       }
 
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026');
+      const decoded = jwt.verify(token, JWT_SECRET);
       const user = await User.findById(decoded.id);
 
       if (!user || user.isBanned) {
@@ -34,7 +40,7 @@ const registerChatHandlers = (io) => {
   io.on('connection', async (socket) => {
     const userId = socket.user.id;
     console.log(`User connected to websocket: ${socket.user.username} (${socket.id})`);
-    
+
     // Register active user
     activeUsers.set(userId, socket.id);
 

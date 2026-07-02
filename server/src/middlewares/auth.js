@@ -1,6 +1,12 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[AUTH FATAL] JWT_SECRET is required in environment variables.');
+  process.exit(1);
+}
+
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
@@ -10,7 +16,7 @@ const authenticateToken = async (req, res, next) => {
   }
 
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026');
+    const decoded = jwt.verify(token, JWT_SECRET);
     const user = await User.findById(decoded.id);
 
     if (!user) {
@@ -18,9 +24,9 @@ const authenticateToken = async (req, res, next) => {
     }
 
     if (user.isBanned) {
-      return res.status(403).json({ 
-        error: 'Your account has been suspended', 
-        reason: user.banReason || 'Violation of community guidelines' 
+      return res.status(403).json({
+        error: 'Your account has been suspended',
+        reason: user.banReason || 'Violation of community guidelines'
       });
     }
 

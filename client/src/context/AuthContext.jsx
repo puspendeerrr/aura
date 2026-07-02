@@ -9,9 +9,9 @@ export const AuthProvider = ({ children }) => {
 
   // Configure global API call helper
   const apiCall = async (endpoint, options = {}) => {
-    const baseUrl = 'http://localhost:5000/api';
+    const baseUrl = import.meta.env.VITE_API_URL || '';
     const url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
-    
+
     const headers = {
       ...options.headers,
     };

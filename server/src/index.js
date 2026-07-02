@@ -32,9 +32,14 @@ app.use(helmet({
 // Apply global rate limiting to all api endpoints
 app.use('/api', apiLimiter);
 
+const clientUrl = process.env.CLIENT_URL;
+if (!clientUrl) {
+  console.warn('[CORS WARNING] CLIENT_URL is not defined. Allowing all origins for compatibility.');
+}
+
 // Configure CORS
 app.use(cors({
-  origin: '*',
+  origin: clientUrl || true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
@@ -64,7 +69,7 @@ app.get('/', (req, res) => {
 // Configure Socket.io server
 const io = new Server(server, {
   cors: {
-    origin: '*',
+    origin: clientUrl || true,
     methods: ['GET', 'POST'],
   },
 });

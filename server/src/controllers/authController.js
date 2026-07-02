@@ -3,11 +3,17 @@ const jwt = require('jsonwebtoken');
 const User = require('../models/User');
 const emailService = require('../services/email');
 
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error('[AUTH FATAL] JWT_SECRET is required in environment variables.');
+  process.exit(1);
+}
+
 // Helper to generate JWT
 const generateToken = (userId) => {
   return jwt.sign(
     { id: userId },
-    process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026',
+    JWT_SECRET,
     { expiresIn: '7d' }
   );
 };

@@ -4,6 +4,8 @@ import { useAuth } from './AuthContext';
 
 const SocketContext = createContext(null);
 
+const socketBaseUrl = (import.meta.env.VITE_API_URL || '').replace(/\/api\/?$/, '');
+
 export const SocketProvider = ({ children }) => {
   const { token, user } = useAuth();
   const [socket, setSocket] = useState(null);
@@ -19,7 +21,7 @@ export const SocketProvider = ({ children }) => {
     }
 
     // Connect to WebSocket server with auth payload
-    const newSocket = io('http://localhost:5000', {
+    const newSocket = io(socketBaseUrl || undefined, {
       auth: { token },
     });
 
@@ -30,7 +32,7 @@ export const SocketProvider = ({ children }) => {
     // Handle incoming live notification banners
     newSocket.on('live_notification', (notif) => {
       setNotifications((prev) => [notif, ...prev]);
-      
+
       // Auto-remove notification banner after 5 seconds
       setTimeout(() => {
         setNotifications((prev) => prev.filter((n) => n.id !== notif.id));
@@ -51,15 +53,15 @@ export const SocketProvider = ({ children }) => {
   return (
     <SocketContext.Provider value={{ socket, notifications, dismissNotification }}>
       {children}
-      
+
       {/* Toast Notification Container */}
       <div style={toastContainerStyle}>
         {notifications.map((notif) => (
           <div key={notif.id} style={toastStyle} className="glass-panel animate-fade">
-            <img 
-              src={notif.sender?.avatar ? `http://localhost:5000${notif.sender.avatar}` : 'https://api.dicebear.com/7.x/identicon/svg?seed=aura'} 
-              alt={notif.sender?.username} 
-              style={toastAvatarStyle} 
+            <img
+              src={notif.sender?.avatar ? (notif.sender.avatar.startsWith('http') ? notif.sender.avatar : `${socketBaseUrl}${notif.sender.avatar}`) : 'https://api.dicebear.com/7.x/identicon/svg?seed=aura'}
+              alt={notif.sender?.username}
+              style={toastAvatarStyle}
             />
             <div style={toastContentStyle}>
               <strong>@{notif.sender?.username}</strong>
@@ -72,7 +74,7 @@ export const SocketProvider = ({ children }) => {
                 {notif.type === 'MENTION' ? 'mentioned you in a comment' : ''}
               </p>
             </div>
-            <button 
+            <button
               onClick={() => dismissNotification(notif.id)}
               style={toastCloseBtnStyle}
             >

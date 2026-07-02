@@ -45,68 +45,49 @@ const dnsResolveSrvHttps = async (host) => {
 
 const connectDB = async () => {
   let connUri = process.env.MONGODB_URI;
-  
-  if (connUri) {
-    // Reconstruct connection string if SRV lookup fails locally
-    if (connUri.startsWith('mongodb+srv://')) {
-      const srvHost = connUri.replace('mongodb+srv://', '').split('/')[0].split('@').pop().split('?')[0];
-      
-      let srvRecords = null;
-      try {
-        console.log(`[DATABASE] Performing local DNS SRV lookup for: _mongodb._tcp.${srvHost}`);
-        srvRecords = await dns.promises.resolveSrv(`_mongodb._tcp.${srvHost}`);
-        console.log('[DATABASE] Local DNS SRV lookup succeeded:', srvRecords);
-      } catch (dnsErr) {
-        console.warn(`[DATABASE WARNING] Local DNS SRV lookup failed (${dnsErr.message}). Attempting DNS-over-HTTPS...`);
-        srvRecords = await dnsResolveSrvHttps(srvHost);
-      }
 
-      if (srvRecords && srvRecords.length > 0) {
-        const credsAndHost = connUri.replace('mongodb+srv://', '').split('/')[0];
-        const hasCreds = credsAndHost.includes('@');
-        const credentials = hasCreds ? credsAndHost.split('@')[0] : '';
-        
-        const nodes = srvRecords.map(r => `${r.name}:${r.port}`).join(',');
-        const pathAndParams = connUri.replace('mongodb+srv://', '').split('/')[1] || '';
-        
-        const separator = pathAndParams.includes('?') ? '&' : '?';
-        connUri = `mongodb://${hasCreds ? `${credentials}@` : ''}${nodes}/${pathAndParams}${separator}ssl=true&authSource=admin`;
-        
-        console.log('[DATABASE] Successfully reconstructed standard connection string via SRV translation.');
-      }
+  if (!connUri) {
+    console.error('[DATABASE FATAL] MONGODB_URI is required in environment variables.');
+    process.exit(1);
+  }
+
+  // Reconstruct connection string if SRV lookup fails locally
+  if (connUri.startsWith('mongodb+srv://')) {
+    const srvHost = connUri.replace('mongodb+srv://', '').split('/')[0].split('@').pop().split('?')[0];
+
+    let srvRecords = null;
+    try {
+      console.log(`[DATABASE] Performing local DNS SRV lookup for: _mongodb._tcp.${srvHost}`);
+      srvRecords = await dns.promises.resolveSrv(`_mongodb._tcp.${srvHost}`);
+      console.log('[DATABASE] Local DNS SRV lookup succeeded:', srvRecords);
+    } catch (dnsErr) {
+      console.warn(`[DATABASE WARNING] Local DNS SRV lookup failed (${dnsErr.message}). Attempting DNS-over-HTTPS...`);
+      srvRecords = await dnsResolveSrvHttps(srvHost);
     }
 
-    try {
-      console.log('[DATABASE] Attempting connection to MongoDB...');
-      const conn = await mongoose.connect(connUri, { serverSelectionTimeoutMS: 5000 });
-      console.log(`[DATABASE] Connected to MongoDB: ${conn.connection.host}`);
-      return conn;
-    } catch (err) {
-      console.error(`[DATABASE WARNING] Connection to MongoDB failed: ${err.message}`);
+    if (srvRecords && srvRecords.length > 0) {
+      const credsAndHost = connUri.replace('mongodb+srv://', '').split('/')[0];
+      const hasCreds = credsAndHost.includes('@');
+      const credentials = hasCreds ? credsAndHost.split('@')[0] : '';
+
+      const nodes = srvRecords.map(r => `${r.name}:${r.port}`).join(',');
+      const pathAndParams = connUri.replace('mongodb+srv://', '').split('/')[1] || '';
+
+      const separator = pathAndParams.includes('?') ? '&' : '?';
+      connUri = `mongodb://${hasCreds ? `${credentials}@` : ''}${nodes}/${pathAndParams}${separator}ssl=true&authSource=admin`;
+
+      console.log('[DATABASE] Successfully reconstructed standard connection string via SRV translation.');
     }
   }
 
-  // Fallback to local MongoDB or MongoMemoryServer
   try {
-    const localUri = 'mongodb://localhost:27017/aura';
-    console.log(`[DATABASE] Attempting connection to local MongoDB at ${localUri}...`);
-    const conn = await mongoose.connect(localUri, { serverSelectionTimeoutMS: 2000 });
-    console.log(`[DATABASE] Connected to local MongoDB: ${conn.connection.host}`);
+    console.log('[DATABASE] Attempting connection to MongoDB...');
+    const conn = await mongoose.connect(connUri, { serverSelectionTimeoutMS: 5000 });
+    console.log(`[DATABASE] Connected to MongoDB: ${conn.connection.host}`);
     return conn;
-  } catch (localErr) {
-    console.log('[DATABASE] Local MongoDB connection failed. Starting in-memory MongoDB database...');
-    try {
-      const mongoServer = await MongoMemoryServer.create();
-      connUri = mongoServer.getUri();
-      global.__MONGO_MEMORY_SERVER__ = mongoServer;
-      
-      const conn = await mongoose.connect(connUri);
-      console.log(`[DATABASE] Connected to in-memory MongoDB: ${conn.connection.host}`);
-      return conn;
-    } catch (memErr) {
-      console.error(`[DATABASE FATAL] In-memory MongoDB failed to start: ${memErr.message}`);
-      process.exit(1);
-    }
+  } catch (err) {
+    console.error(`[DATABASE FATAL] Connection to MongoDB failed: ${err.message}`);
+    process.exit(1);
   }
 };
 
