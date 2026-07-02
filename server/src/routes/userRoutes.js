@@ -13,5 +13,7 @@ router.get('/suggested', authenticateToken, userController.getSuggestedCreators)
 router.get('/profile/:username/followers', authenticateToken, userController.getFollowersList);
 router.get('/profile/:username/following', authenticateToken, userController.getFollowingList);
 router.get('/profile/:username/mutual', authenticateToken, userController.getMutualFollowersList);
+router.post('/change-password', authenticateToken, userController.changePassword);
+router.delete('/delete-account', authenticateToken, userController.deleteAccount);
 
 module.exports = router;

@@ -1,5 +1,8 @@
 const jwt = require('jsonwebtoken');
-const prisma = require('../config/db');
+const User = require('../models/User');
+const Room = require('../models/Room');
+const Message = require('../models/Message');
+const Block = require('../models/Block');
 
 // Map to track active user socket IDs: userId -> socketId
 const activeUsers = new Map();
@@ -14,9 +17,7 @@ const registerChatHandlers = (io) => {
       }
 
       const decoded = jwt.verify(token, process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026');
-      const user = await prisma.user.findUnique({
-        where: { id: decoded.id },
-      });
+      const user = await User.findById(decoded.id);
 
       if (!user || user.isBanned) {
         return next(new Error('Authentication error: Invalid user or user banned'));
@@ -39,10 +40,7 @@ const registerChatHandlers = (io) => {
 
     // Update user online status in database
     try {
-      await prisma.user.update({
-        where: { id: userId },
-        data: { isOnline: true }
-      });
+      await User.findByIdAndUpdate(userId, { $set: { isOnline: true } });
       // Broadcast online status to followers
       socket.broadcast.emit('user_presence', { userId, isOnline: true });
     } catch (err) {
@@ -75,33 +73,22 @@ const registerChatHandlers = (io) => {
         if (!roomId) return;
 
         // Verify sender is participant in the room
-        const isParticipant = await prisma.roomParticipant.findUnique({
-          where: {
-            roomId_userId: { roomId, userId },
-          },
-        });
+        const roomInfo = await Room.findOne({ _id: roomId, "participants.user": userId });
 
-        if (!isParticipant) {
+        if (!roomInfo) {
           socket.emit('error', { message: 'Unauthorized to post in this room' });
           return;
         }
 
         // Verify block restrictions for 1-on-1 chats
-        const roomInfo = await prisma.room.findUnique({
-          where: { id: roomId },
-          include: { participants: true }
-        });
-
-        if (roomInfo && !roomInfo.isGroup) {
-          const otherParticipant = roomInfo.participants.find(p => p.userId !== userId);
+        if (!roomInfo.isGroup) {
+          const otherParticipant = roomInfo.participants.find(p => p.user.toString() !== userId);
           if (otherParticipant) {
-            const blockRecord = await prisma.block.findFirst({
-              where: {
-                OR: [
-                  { blockerId: userId, blockedId: otherParticipant.userId },
-                  { blockerId: otherParticipant.userId, blockedId: userId }
-                ]
-              }
+            const blockRecord = await Block.findOne({
+              $or: [
+                { blocker: userId, blocked: otherParticipant.user },
+                { blocker: otherParticipant.user, blocked: userId }
+              ]
             });
 
             if (blockRecord) {
@@ -112,58 +99,65 @@ const registerChatHandlers = (io) => {
         }
 
         // Write message to Database with nested media and replies
-        const message = await prisma.message.create({
-          data: {
-            roomId,
-            senderId: userId,
-            text,
-            replyToId: replyToId || null,
-            isForwarded: isForwarded || false,
-            isViewOnce: isViewOnce || false,
-            selfDestructTimer: selfDestructTimer || null,
-            media: {
-              create: media || []
-            }
-          },
-          include: {
-            sender: {
-              select: {
-                id: true,
-                username: true,
-                avatar: true,
-              },
-            },
-            media: true,
-            replyTo: {
-              include: {
-                sender: {
-                  select: { id: true, username: true }
-                }
-              }
-            }
-          },
+        const messageObj = await Message.create({
+          room: roomId,
+          sender: userId,
+          text: text || null,
+          replyTo: replyToId || null,
+          isForwarded: isForwarded || false,
+          isViewOnce: isViewOnce || false,
+          selfDestructTimer: selfDestructTimer || null,
+          media: media || []
         });
 
+        const message = await Message.findById(messageObj._id)
+          .populate('sender', 'id username avatar')
+          .populate({
+            path: 'replyTo',
+            populate: { path: 'sender', select: 'id username' }
+          })
+          .lean();
+
+        const formattedMessage = {
+          ...message,
+          id: message._id.toString(),
+          roomId: message.room ? message.room.toString() : null,
+          senderId: message.sender ? message.sender._id.toString() : null,
+          sender: message.sender ? {
+            id: message.sender._id.toString(),
+            username: message.sender.username,
+            avatar: message.sender.avatar
+          } : null,
+          media: message.media ? message.media.map(m => ({ ...m, id: m._id.toString() })) : [],
+          replyToId: message.replyTo ? message.replyTo._id.toString() : null,
+          replyTo: message.replyTo ? {
+            id: message.replyTo._id.toString(),
+            text: message.replyTo.text,
+            sender: message.replyTo.sender ? {
+              id: message.replyTo.sender._id.toString(),
+              username: message.replyTo.sender.username
+            } : null
+          } : null
+        };
+
         // Broadcast message to all room members
-        io.to(roomId).emit('receive_message', message);
+        io.to(roomId).emit('receive_message', formattedMessage);
 
         // Send notifications to room participants who are not currently focused on the room
-        if (roomInfo) {
-          const recipients = roomInfo.participants.filter(p => p.userId !== userId);
-          for (const recipient of recipients) {
-            const recipientSocketId = activeUsers.get(recipient.userId);
-            if (recipientSocketId) {
-              io.to(recipientSocketId).emit('live_notification', {
-                id: Math.random().toString(),
-                type: 'MESSAGE',
-                sender: {
-                  username: socket.user.username,
-                  avatar: socket.user.avatar,
-                },
-                roomId,
-                messageText: text || (media && media.length > 0 ? 'Sent attachment(s)' : 'Sent a message'),
-              });
-            }
+        const recipients = roomInfo.participants.filter(p => p.user.toString() !== userId);
+        for (const recipient of recipients) {
+          const recipientSocketId = activeUsers.get(recipient.user.toString());
+          if (recipientSocketId) {
+            io.to(recipientSocketId).emit('live_notification', {
+              id: Math.random().toString(),
+              type: 'MESSAGE',
+              sender: {
+                username: socket.user.username,
+                avatar: socket.user.avatar,
+              },
+              roomId,
+              messageText: text || (media && media.length > 0 ? 'Sent attachment(s)' : 'Sent a message'),
+            });
           }
         }
       } catch (err) {
@@ -177,29 +171,28 @@ const registerChatHandlers = (io) => {
       try {
         const { messageId, reaction, roomId } = data;
 
-        // Delete existing reaction from this user if present
-        const existingReaction = await prisma.messageReaction.findFirst({
-          where: { messageId, userId }
+        const message = await Message.findById(messageId);
+        if (!message) return;
+
+        // Remove existing reaction from this user if present
+        message.reactions = message.reactions.filter(r => r.user.toString() !== userId);
+
+        // Save new reaction
+        message.reactions.push({
+          user: userId,
+          username: socket.user.username,
+          reaction
         });
 
-        if (existingReaction) {
-          await prisma.messageReaction.delete({
-            where: { id: existingReaction.id }
-          });
-        }
+        await message.save();
 
-        const msgReaction = await prisma.messageReaction.create({
-          data: {
-            messageId,
-            userId,
-            reaction
-          },
-          include: {
-            user: { select: { username: true } }
-          }
-        });
+        const formattedReaction = {
+          userId,
+          username: socket.user.username,
+          reaction
+        };
 
-        io.to(roomId).emit('message_reaction_update', { messageId, msgReaction });
+        io.to(roomId).emit('message_reaction_update', { messageId, msgReaction: formattedReaction });
       } catch (err) {
         console.error('Socket react message error:', err);
       }
@@ -219,24 +212,16 @@ const registerChatHandlers = (io) => {
         if (!roomId) return;
 
         // Update read status for messages sent by others in the room
-        await prisma.message.updateMany({
-          where: {
-            roomId,
-            senderId: { not: userId },
-            status: 'SENT',
-          },
-          data: { status: 'READ' },
-        });
+        await Message.updateMany(
+          { room: roomId, sender: { $ne: userId }, status: 'SENT' },
+          { $set: { status: 'READ' } }
+        );
 
         // Update user's last read timestamp for this room
-        await prisma.roomParticipant.update({
-          where: {
-            roomId_userId: { roomId, userId }
-          },
-          data: {
-            lastReadAt: new Date()
-          }
-        });
+        await Room.updateOne(
+          { _id: roomId, "participants.user": userId },
+          { $set: { "participants.$.lastReadAt": new Date() } }
+        );
 
         // Notify other room participants that messages are read
         socket.to(roomId).emit('messages_read', { roomId });
@@ -251,9 +236,8 @@ const registerChatHandlers = (io) => {
       activeUsers.delete(userId);
 
       try {
-        await prisma.user.update({
-          where: { id: userId },
-          data: {
+        await User.findByIdAndUpdate(userId, {
+          $set: {
             isOnline: false,
             lastSeen: new Date()
           }

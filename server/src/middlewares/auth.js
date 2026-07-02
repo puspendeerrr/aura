@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const prisma = require('../config/db');
+const User = require('../models/User');
 
 const authenticateToken = async (req, res, next) => {
   const authHeader = req.headers['authorization'];
@@ -11,9 +11,7 @@ const authenticateToken = async (req, res, next) => {
 
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'aura_super_secret_jwt_key_2026');
-    const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
-    });
+    const user = await User.findById(decoded.id);
 
     if (!user) {
       return res.status(401).json({ error: 'User not found or session expired' });
@@ -35,8 +33,6 @@ const authenticateToken = async (req, res, next) => {
 };
 
 const isAdmin = (req, res, next) => {
-  // For standard admin logic: verify if the user is the pre-configured admin or has an admin flag.
-  // In our schema, we can designate any username 'admin' or define specific usernames as admins.
   if (req.user && req.user.username.toLowerCase() === 'admin') {
     next();
   } else {

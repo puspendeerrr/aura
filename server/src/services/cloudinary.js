@@ -1,7 +1,9 @@
 const cloudinary = require('cloudinary').v2;
 
-// Configure Cloudinary if credentials are provided
-if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+// Configure Cloudinary
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('[CLOUDINARY WARNING] Cloudinary configuration is incomplete. Image and video uploads will fail.');
+} else {
   cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -18,37 +20,8 @@ if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && proce
  */
 const uploadStream = (fileBuffer, folder = 'aura', resourceType = 'image') => {
   return new Promise((resolve, reject) => {
-    // If Cloudinary is not configured, fall back to mock image URLs for local development
     if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-      console.log(`\n[CLOUDINARY MOCK] Credentials missing. Automatically mocking file upload for folder: ${folder}`);
-      
-      const mockImages = [
-        'https://images.unsplash.com/photo-1502082553048-f009c37129b9?w=800',
-        'https://images.unsplash.com/photo-1544005313-94ddf0286df2?w=800',
-        'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=800',
-        'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=800',
-        'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=800',
-        'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=800'
-      ];
-      
-      const mockVideos = [
-        'https://assets.mixkit.co/videos/preview/mixkit-tree-with-yellow-flowers-48733-large.mp4',
-        'https://assets.mixkit.co/videos/preview/mixkit-stars-in-space-background-1611-large.mp4'
-      ];
-
-      const selectedUrl = resourceType === 'video' 
-        ? mockVideos[Math.floor(Math.random() * mockVideos.length)]
-        : mockImages[Math.floor(Math.random() * mockImages.length)];
-
-      // Simulate a small delay for upload network latency
-      setTimeout(() => {
-        resolve({
-          secure_url: selectedUrl,
-          public_id: `mock_${Date.now()}`,
-          resource_type: resourceType,
-        });
-      }, 500);
-      return;
+      return reject(new Error('Cloudinary credentials are not configured on the server. Please check your .env file.'));
     }
 
     const stream = cloudinary.uploader.upload_stream(

@@ -1,13 +1,14 @@
-const prisma = require('../config/db');
+const User = require('../models/User');
+const Post = require('../models/Post');
+const Comment = require('../models/Comment');
+const Report = require('../models/Report');
 
 exports.getDashboardStats = async (req, res) => {
   try {
-    const totalUsers = await prisma.user.count();
-    const totalPosts = await prisma.post.count();
-    const totalComments = await prisma.comment.count();
-    const totalReports = await prisma.report.count({
-      where: { status: 'PENDING' }
-    });
+    const totalUsers = await User.countDocuments();
+    const totalPosts = await Post.countDocuments();
+    const totalComments = await Comment.countDocuments();
+    const totalReports = await Report.countDocuments({ status: 'PENDING' });
 
     // Simple analytics dashboard mock representation
     return res.json({
@@ -26,22 +27,17 @@ exports.getDashboardStats = async (req, res) => {
 
 exports.getUsersList = async (req, res) => {
   try {
-    const users = await prisma.user.findMany({
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        email: true,
-        phone: true,
-        username: true,
-        name: true,
-        isPrivate: true,
-        isBanned: true,
-        banReason: true,
-        createdAt: true,
-      },
-    });
+    const users = await User.find()
+      .sort({ createdAt: -1 })
+      .select('id email phone username name isPrivate isBanned banReason createdAt')
+      .lean();
 
-    return res.json({ users });
+    const formattedUsers = users.map(u => ({
+      ...u,
+      id: u._id.toString()
+    }));
+
+    return res.json({ users: formattedUsers });
   } catch (err) {
     console.error('Admin user list error:', err);
     return res.status(500).json({ error: 'Failed to load user list' });
@@ -50,30 +46,40 @@ exports.getUsersList = async (req, res) => {
 
 exports.getReports = async (req, res) => {
   try {
-    const reports = await prisma.report.findMany({
-      where: { status: 'PENDING' },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        reporter: {
-          select: { id: true, username: true },
-        },
-        reportedUser: {
-          select: { id: true, username: true },
-        },
-        post: {
-          select: { id: true, media: true, caption: true },
-        },
-      },
-    });
+    const reports = await Report.find({ status: 'PENDING' })
+      .sort({ createdAt: -1 })
+      .populate('reporter', 'id username')
+      .populate('reportedUser', 'id username')
+      .populate('post', 'id media caption')
+      .lean();
 
     // Formatting media thumbnail
     const formattedReports = reports.map((rep) => {
       let mediaThumbnail = null;
-      if (rep.post && rep.post.media) {
-        mediaThumbnail = rep.post.media.split(',')[0];
+      if (rep.post && rep.post.media && rep.post.media[0]) {
+        mediaThumbnail = rep.post.media[0].url;
       }
       return {
-        ...rep,
+        id: rep._id.toString(),
+        reporterId: rep.reporter ? rep.reporter._id.toString() : null,
+        reporter: rep.reporter ? {
+          id: rep.reporter._id.toString(),
+          username: rep.reporter.username
+        } : null,
+        reportedUserId: rep.reportedUser ? rep.reportedUser._id.toString() : null,
+        reportedUser: rep.reportedUser ? {
+          id: rep.reportedUser._id.toString(),
+          username: rep.reportedUser.username
+        } : null,
+        postId: rep.post ? rep.post._id.toString() : null,
+        post: rep.post ? {
+          id: rep.post._id.toString(),
+          caption: rep.post.caption,
+          media: rep.post.media
+        } : null,
+        reason: rep.reason,
+        status: rep.status,
+        createdAt: rep.createdAt,
         mediaThumbnail,
       };
     });
@@ -94,19 +100,26 @@ exports.createReport = async (req, res) => {
       return res.status(400).json({ error: 'Reason for report is required' });
     }
 
-    const report = await prisma.report.create({
-      data: {
-        reporterId,
-        postId,
-        reportedUserId,
-        reason,
-        status: 'PENDING',
-      },
+    const reportObj = await Report.create({
+      reporter: reporterId,
+      post: postId || null,
+      reportedUser: reportedUserId || null,
+      reason,
+      status: 'PENDING',
     });
+
+    const report = await Report.findById(reportObj._id)
+      .populate('reporter', 'id username')
+      .populate('reportedUser', 'id username')
+      .populate('post', 'id media caption')
+      .lean();
 
     return res.status(201).json({
       message: 'Report submitted successfully. Moderation will review this.',
-      report,
+      report: {
+        ...report,
+        id: report._id.toString()
+      },
     });
   } catch (err) {
     console.error('Create report error:', err);
@@ -119,33 +132,24 @@ exports.resolveReport = async (req, res) => {
     const { reportId } = req.params;
     const { action } = req.body; // 'KEEP' or 'DELETE'
 
-    const report = await prisma.report.findUnique({
-      where: { id: reportId },
-      include: { post: true },
-    });
+    const report = await Report.findById(reportId);
 
     if (!report) {
       return res.status(404).json({ error: 'Report not found' });
     }
 
-    if (action === 'DELETE' && report.postId) {
+    if (action === 'DELETE' && report.post) {
       // Delete the flagged post
-      await prisma.post.delete({
-        where: { id: report.postId },
-      });
+      await Post.deleteOne({ _id: report.post });
       
-      await prisma.report.update({
-        where: { id: reportId },
-        data: { status: 'RESOLVED_DELETED' },
-      });
+      report.status = 'RESOLVED_DELETED';
+      await report.save();
 
       return res.json({ message: 'Report resolved. Post deleted.' });
     } else {
       // Mark as resolved without delete
-      await prisma.report.update({
-        where: { id: reportId },
-        data: { status: 'RESOLVED_NO_ACTION' },
-      });
+      report.status = 'RESOLVED_NO_ACTION';
+      await report.save();
 
       return res.json({ message: 'Report resolved. No action taken.' });
     }
@@ -160,9 +164,7 @@ exports.toggleUserBan = async (req, res) => {
     const { userId } = req.params;
     const { ban, reason } = req.body; // ban: boolean, reason: string
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-    });
+    const user = await User.findById(userId);
 
     if (!user) {
       return res.status(404).json({ error: 'User not found' });
@@ -172,20 +174,16 @@ exports.toggleUserBan = async (req, res) => {
       return res.status(400).json({ error: 'Cannot ban the admin user' });
     }
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        isBanned: ban,
-        banReason: ban ? (reason || 'Community violation') : null,
-      },
-    });
+    user.isBanned = ban;
+    user.banReason = ban ? (reason || 'Community violation') : null;
+    await user.save();
 
     return res.json({
       message: ban ? `User ${user.username} has been banned.` : `User ${user.username} has been reinstated.`,
       user: {
-        id: updatedUser.id,
-        username: updatedUser.username,
-        isBanned: updatedUser.isBanned,
+        id: user.id,
+        username: user.username,
+        isBanned: user.isBanned,
       },
     });
   } catch (err) {

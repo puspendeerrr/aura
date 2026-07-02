@@ -2,11 +2,15 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const path = require('path');
 const http = require('http');
 const { Server } = require('socket.io');
 
-const prisma = require('./config/db');
+const db = require('./config/db');
+const User = require('./models/User');
+const Story = require('./models/Story');
+
 const authRoutes = require('./routes/authRoutes');
 const userRoutes = require('./routes/userRoutes');
 const postRoutes = require('./routes/postRoutes');
@@ -37,6 +41,7 @@ app.use(cors({
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
 
 // Serve static assets if local fallback occurs
 const uploadsDir = path.join(__dirname, '../uploads');
@@ -71,15 +76,11 @@ registerChatHandlers(io);
 setInterval(async () => {
   try {
     const now = new Date();
-    // Delete expired stories from postgres DB
-    const expiredStories = await prisma.story.findMany({
-      where: { expiresAt: { lte: now } },
-    });
+    // Delete expired stories from MongoDB
+    const expiredStories = await Story.find({ expiresAt: { $lte: now } });
 
     if (expiredStories.length > 0) {
-      await prisma.story.deleteMany({
-        where: { expiresAt: { lte: now } },
-      });
+      await Story.deleteMany({ expiresAt: { $lte: now } });
       console.log(`[STORY SCRUBBER] Auto-cleaned ${expiredStories.length} expired stories from database.`);
     }
   } catch (err) {
@@ -93,32 +94,32 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: err.message || 'An unexpected error occurred on the server' });
 });
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, async () => {
-  console.log(`\n==========================================\n[AURA SERVER ACTIVE] listening on port ${PORT}\n==========================================\n`);
-  
-  // Seed admin user automatically if DB is active
+const mongoose = require('mongoose');
+
+// Seed admin user automatically when connection is established
+mongoose.connection.once('open', async () => {
   try {
     const bcrypt = require('bcrypt');
-    const adminUser = await prisma.user.findUnique({
-      where: { username: 'admin' }
-    });
+    const adminUser = await User.findOne({ username: 'admin' });
     if (!adminUser) {
       const passwordHash = await bcrypt.hash('adminpassword123', 10);
-      await prisma.user.create({
-        data: {
-          username: 'admin',
-          email: 'admin@aurasocial.com',
-          passwordHash,
-          verified: true,
-          name: 'Aura Moderator',
-          bio: 'System Admin and platform moderator.',
-          avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'
-        }
+      await User.create({
+        username: 'admin',
+        email: 'admin@aurasocial.com',
+        passwordHash,
+        verified: true,
+        name: 'Aura Moderator',
+        bio: 'System Admin and platform moderator.',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=120'
       });
       console.log('[SEED] Automatically created admin user account (username: admin, pass: adminpassword123).');
     }
   } catch (err) {
-    console.log('[SEED] Auto-seed skipped: PostgreSQL connection is not active yet.');
+    console.error('[SEED] Failed to seed admin user:', err);
   }
+});
+
+const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => {
+  console.log(`\n==========================================\n[AURA SERVER ACTIVE] listening on port ${PORT}\n==========================================\n`);
 });

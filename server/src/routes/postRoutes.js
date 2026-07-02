@@ -22,4 +22,10 @@ router.post('/:postId/like', authenticateToken, postController.toggleLike);
 router.post('/:postId/comment', authenticateToken, postController.addComment);
 router.post('/:postId/save', authenticateToken, postController.toggleSave);
 
+// Extended Comment Operations
+router.put('/comments/:commentId', authenticateToken, postController.updateComment);
+router.delete('/comments/:commentId', authenticateToken, postController.deleteComment);
+router.post('/comments/:commentId/like', authenticateToken, postController.toggleLikeComment);
+router.post('/:postId/comment/:commentId/reply', authenticateToken, postController.replyToComment);
+
 module.exports = router;

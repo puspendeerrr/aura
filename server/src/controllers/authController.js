@@ -1,6 +1,6 @@
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-const prisma = require('../config/db');
+const User = require('../models/User');
 const emailService = require('../services/email');
 
 // Helper to generate JWT
@@ -21,13 +21,11 @@ exports.register = async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: email.toLowerCase() },
-          { username: username.toLowerCase() }
-        ]
-      }
+    const existingUser = await User.findOne({
+      $or: [
+        { email: email.toLowerCase() },
+        { username: username.toLowerCase() }
+      ]
     });
 
     if (existingUser) {
@@ -41,18 +39,16 @@ exports.register = async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(password, saltRounds);
 
-    const user = await prisma.user.create({
-      data: {
-        email: email.toLowerCase(),
-        phone,
-        username: username.toLowerCase(),
-        passwordHash,
-        name,
-        verified: true, // Automatically mark the user as verified
-      }
+    const user = await User.create({
+      email: email.toLowerCase(),
+      phone,
+      username: username.toLowerCase(),
+      passwordHash,
+      name,
+      verified: true, // Automatically mark the user as verified
     });
 
-    const token = generateToken(user.id);
+    const token = generateToken(user._id);
 
     return res.status(201).json({
       message: 'Registration successful!',
@@ -79,13 +75,11 @@ exports.login = async (req, res) => {
       return res.status(400).json({ error: 'Email/Username and password are required' });
     }
 
-    const user = await prisma.user.findFirst({
-      where: {
-        OR: [
-          { email: loginKey.toLowerCase() },
-          { username: loginKey.toLowerCase() }
-        ]
-      }
+    const user = await User.findOne({
+      $or: [
+        { email: loginKey.toLowerCase() },
+        { username: loginKey.toLowerCase() }
+      ]
     });
 
     if (!user) {
@@ -104,7 +98,7 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Invalid username or password' });
     }
 
-    const token = generateToken(user.id);
+    const token = generateToken(user._id);
 
     return res.json({
       message: 'Login successful',
@@ -132,9 +126,7 @@ exports.forgotPassword = async (req, res) => {
       return res.status(400).json({ error: 'Email is required' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() }
-    });
+    const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user) {
       // Return 200 to prevent user enumeration
@@ -144,13 +136,9 @@ exports.forgotPassword = async (req, res) => {
     const resetToken = Math.floor(100000 + Math.random() * 900000).toString();
     const expiry = new Date(Date.now() + 30 * 60 * 1000); // 30 mins
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        resetToken,
-        resetTokenExpiry: expiry,
-      }
-    });
+    user.resetToken = resetToken;
+    user.resetTokenExpiry = expiry;
+    await user.save();
 
     // Send password reset email via service
     await emailService.sendPasswordResetCode(user.email, resetToken);
@@ -170,9 +158,7 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ error: 'Email, code, and new password are required' });
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() }
-    });
+    const user = await User.findOne({ email: email.toLowerCase() });
 
     if (!user || user.resetToken !== code || new Date() > user.resetTokenExpiry) {
       return res.status(400).json({ error: 'Invalid or expired password reset code' });
@@ -181,14 +167,10 @@ exports.resetPassword = async (req, res) => {
     const saltRounds = 10;
     const passwordHash = await bcrypt.hash(newPassword, saltRounds);
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        resetToken: null,
-        resetTokenExpiry: null,
-      }
-    });
+    user.passwordHash = passwordHash;
+    user.resetToken = null;
+    user.resetTokenExpiry = null;
+    await user.save();
 
     return res.json({ message: 'Password reset successful!' });
   } catch (err) {

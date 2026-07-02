@@ -1,4 +1,8 @@
-const prisma = require('../config/db');
+const User = require('../models/User');
+const Follow = require('../models/Follow');
+const Block = require('../models/Block');
+const Story = require('../models/Story');
+const StoryViewer = require('../models/StoryViewer');
 const { uploadStream } = require('../services/cloudinary');
 
 exports.createStory = async (req, res) => {
@@ -15,26 +19,23 @@ exports.createStory = async (req, res) => {
     
     const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours from now
 
-    const story = await prisma.story.create({
-      data: {
-        url: mediaUrl,
-        userId,
-        expiresAt,
-      },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            avatar: true,
-          },
-        },
-      },
+    const storyObj = await Story.create({
+      url: mediaUrl,
+      user: userId,
+      expiresAt,
     });
+
+    const story = await Story.findById(storyObj._id)
+      .populate('user', 'id username avatar');
+
+    const formattedStory = {
+      ...story.toJSON(),
+      userId: story.user._id.toString()
+    };
 
     return res.status(201).json({
       message: 'Story uploaded successfully!',
-      story,
+      story: formattedStory,
     });
   } catch (err) {
     console.error('Create story error:', err);
@@ -48,76 +49,67 @@ exports.getStoriesFeed = async (req, res) => {
     const now = new Date();
 
     // Get following list
-    const followingRecords = await prisma.follow.findMany({
-      where: {
-        followerId: userId,
-        status: 'ACCEPTED',
-      },
-      select: { followingId: true },
+    const followingRecords = await Follow.find({
+      follower: userId,
+      status: 'ACCEPTED',
     });
 
-    const feedUserIds = followingRecords.map((r) => r.followingId);
+    const feedUserIds = followingRecords.map((r) => r.following.toString());
     feedUserIds.push(userId); // include own stories
 
     // Filter exclusions (blocked profiles)
-    const blocks = await prisma.block.findMany({
-      where: {
-        OR: [
-          { blockerId: userId },
-          { blockedId: userId }
-        ]
-      }
+    const blocks = await Block.find({
+      $or: [
+        { blocker: userId },
+        { blocked: userId }
+      ]
     });
-    const blockedUserIds = blocks.map(r => r.blockerId === userId ? r.blockedId : r.blockerId);
+    const blockedUserIds = blocks.map(r => r.blocker.toString() === userId ? r.blocked.toString() : r.blocker.toString());
     const validFeedUserIds = feedUserIds.filter(id => !blockedUserIds.includes(id));
 
+    // Filter banned users
+    const bannedUsers = await User.find({ isBanned: true }, '_id');
+    const bannedUserIds = bannedUsers.map(u => u._id.toString());
+    const activeFeedUserIds = validFeedUserIds.filter(id => !bannedUserIds.includes(id));
+
     // Fetch active stories
-    const activeStories = await prisma.story.findMany({
-      where: {
-        userId: { in: validFeedUserIds },
-        expiresAt: { gt: now },
-        user: { isBanned: false },
-      },
-      orderBy: { createdAt: 'asc' },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            avatar: true,
-          },
-        },
-        viewers: {
-          where: { userId },
-          select: { userId: true },
-        },
-      },
-    });
+    const activeStories = await Story.find({
+      user: { $in: activeFeedUserIds },
+      expiresAt: { $gt: now },
+    })
+      .sort({ createdAt: 1 })
+      .populate('user', 'id username avatar')
+      .lean();
 
     // Group stories by User to make it easy for frontend rendering
     const groupedStoriesMap = {};
 
     for (const story of activeStories) {
-      const uId = story.userId;
+      if (!story.user) continue;
+      const uId = story.user._id.toString();
       if (!groupedStoriesMap[uId]) {
         groupedStoriesMap[uId] = {
-          user: story.user,
+          user: {
+            id: story.user._id.toString(),
+            username: story.user.username,
+            avatar: story.user.avatar,
+          },
           stories: [],
           hasUnviewed: false,
         };
       }
 
-      const isViewed = story.viewers.length > 0;
-      if (!isViewed && story.userId !== userId) {
+      const isViewed = await StoryViewer.exists({ story: story._id, user: userId });
+      if (!isViewed && uId !== userId) {
         groupedStoriesMap[uId].hasUnviewed = true;
       }
 
       groupedStoriesMap[uId].stories.push({
-        id: story.id,
+        id: story._id.toString(),
         media: story.url,
         createdAt: story.createdAt,
         expiresAt: story.expiresAt,
-        isViewed,
+        isViewed: !!isViewed,
       });
     }
 
@@ -144,28 +136,18 @@ exports.viewStory = async (req, res) => {
     const { storyId } = req.params;
     const userId = req.user.id;
 
-    const story = await prisma.story.findUnique({
-      where: { id: storyId },
-    });
+    const story = await Story.findById(storyId);
 
     if (!story) {
       return res.status(404).json({ error: 'Story not found' });
     }
 
     // Record view in StoryViewer
-    await prisma.storyViewer.upsert({
-      where: {
-        storyId_userId: {
-          storyId,
-          userId,
-        },
-      },
-      update: {},
-      create: {
-        storyId,
-        userId,
-      },
-    });
+    await StoryViewer.findOneAndUpdate(
+      { story: storyId, user: userId },
+      { $setOnInsert: { story: storyId, user: userId } },
+      { upsert: true, new: true }
+    );
 
     return res.json({ message: 'Story marked as viewed' });
   } catch (err) {
@@ -179,35 +161,33 @@ exports.getStoryViewers = async (req, res) => {
     const { storyId } = req.params;
     const userId = req.user.id;
 
-    const story = await prisma.story.findUnique({
-      where: { id: storyId },
-    });
+    const story = await Story.findById(storyId);
 
     if (!story) {
       return res.status(404).json({ error: 'Story not found' });
     }
 
     // Only owner can check viewers
-    if (story.userId !== userId) {
+    if (story.user.toString() !== userId) {
       return res.status(403).json({ error: 'Unauthorized to view story statistics' });
     }
 
-    const viewers = await prisma.storyViewer.findMany({
-      where: { storyId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            username: true,
-            name: true,
-            avatar: true,
-          },
-        },
-      },
-      orderBy: { viewedAt: 'desc' },
-    });
+    const viewersRecords = await StoryViewer.find({ story: storyId })
+      .populate('user', 'id username name avatar')
+      .sort({ viewedAt: -1 })
+      .lean();
 
-    return res.json({ viewers: viewers.map((v) => v.user) });
+    const viewers = viewersRecords.map((v) => {
+      if (!v.user) return null;
+      return {
+        id: v.user._id.toString(),
+        username: v.user.username,
+        name: v.user.name,
+        avatar: v.user.avatar,
+      };
+    }).filter(Boolean);
+
+    return res.json({ viewers });
   } catch (err) {
     console.error('Get story viewers error:', err);
     return res.status(500).json({ error: 'Failed to fetch viewers' });

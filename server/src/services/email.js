@@ -18,8 +18,8 @@ const sendPasswordResetCode = async (email, code) => {
   `;
 
   if (!process.env.RESEND_API_KEY) {
-    console.log(`\n==========================================\n[AURA PASSWORD RESET MOCK]\nTo: ${email}\nSubject: ${subject}\nReset Code: ${code}\n==========================================\n`);
-    return true;
+    console.error('[EMAIL WARNING] Resend API key is missing. Reset emails will not be sent.');
+    return false;
   }
 
   try {
@@ -54,5 +54,3 @@ const sendPasswordResetCode = async (email, code) => {
 module.exports = {
   sendPasswordResetCode,
 };
-
-
